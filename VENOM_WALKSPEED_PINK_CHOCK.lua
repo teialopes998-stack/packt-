@@ -1,0 +1,398 @@
+--[[
+  VENOM PACKET LAGGER
+  - VENOM GUI (Packet Power, Toggle Keybind, START/STOP)
+  - M10RU Logic (SetPlayerBlockList Bomb, Delay = 0.001s fest)
+  - Head Tag: leak by Demi
+]]
+
+repeat task.wait() until game:IsLoaded()
+
+local Players = game:GetService("Players")
+local UIS     = game:GetService("UserInputService")
+local TS      = game:GetService("TweenService")
+local LP      = Players.LocalPlayer
+
+-- ══════════════════════════════════════════════════════════════════
+--  HEAD TAG — leak by Demi
+-- ══════════════════════════════════════════════════════════════════
+do
+    pcall(function()
+        local c = LP.Character
+        local h = c and c:FindFirstChild("Head")
+        local old = h and h:FindFirstChild("DemiLeakTag")
+        if old then old:Destroy() end
+    end)
+
+    local function addTag(character)
+        local head = character:WaitForChild("Head", 10)
+        if not head then return end
+        local old = head:FindFirstChild("DemiLeakTag")
+        if old then old:Destroy() end
+
+        local bb = Instance.new("BillboardGui")
+        bb.Name = "DemiLeakTag"
+        bb.Adornee = head
+        bb.AlwaysOnTop = true
+        bb.LightInfluence = 0
+        bb.MaxDistance = 2000
+        bb.Size = UDim2.fromOffset(300, 54)
+        bb.StudsOffset = Vector3.new(0, 4.8, 0)
+        bb.Parent = head
+
+        local frame = Instance.new("Frame")
+        frame.Size = UDim2.fromScale(1, 1)
+        frame.BackgroundColor3 = Color3.fromRGB(255, 20, 147)
+        frame.BackgroundTransparency = 0.08
+        frame.BorderSizePixel = 0
+        frame.Parent = bb
+        Instance.new("UICorner", frame).CornerRadius = UDim.new(0, 12)
+
+        local grad = Instance.new("UIGradient")
+        grad.Color = ColorSequence.new({
+            ColorSequenceKeypoint.new(0, Color3.fromRGB(255, 20, 147)),
+            ColorSequenceKeypoint.new(0.5, Color3.fromRGB(255, 105, 180)),
+            ColorSequenceKeypoint.new(1, Color3.fromRGB(255, 20, 147)),
+        })
+        grad.Rotation = 90
+        grad.Parent = frame
+
+        local stroke = Instance.new("UIStroke")
+        stroke.Color = Color3.fromRGB(255, 245, 252)
+        stroke.Thickness = 2
+        stroke.Transparency = 0.15
+        stroke.Parent = frame
+
+        local link = Instance.new("TextLabel")
+        link.Size = UDim2.new(1, -20, 1, -12)
+        link.Position = UDim2.new(0, 10, 0, 6)
+        link.BackgroundTransparency = 1
+        link.Text = "discord.gg/GvBQmT7Xj"
+        link.TextColor3 = Color3.fromRGB(255, 245, 252)
+        link.TextStrokeColor3 = Color3.fromRGB(30, 10, 60)
+        link.TextStrokeTransparency = 0.2
+        link.Font = Enum.Font.GothamBold
+        link.TextScaled = true
+        link.Parent = frame
+
+        task.spawn(function()
+            while bb.Parent and frame.Parent do
+                TS:Create(stroke, TweenInfo.new(1.2, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut), {
+                    Transparency = 0.5
+                }):Play()
+                task.wait(1.2)
+                if not (bb.Parent and frame.Parent) then break end
+                TS:Create(stroke, TweenInfo.new(1.2, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut), {
+                    Transparency = 0.15
+                }):Play()
+                task.wait(1.2)
+            end
+        end)
+    end
+
+    LP.CharacterAdded:Connect(addTag)
+    if LP.Character then task.spawn(addTag, LP.Character) end
+end
+
+-- ══════════════════════════════════════════════════════════════════
+--  VENOM GUI
+-- ══════════════════════════════════════════════════════════════════
+local C = {
+    bg       = Color3.fromRGB(255, 20, 147),
+    input    = Color3.fromRGB(235, 0, 125),
+    btn      = Color3.fromRGB(255, 70, 170),
+    stroke   = Color3.fromRGB(255, 180, 220),
+    text     = Color3.fromRGB(255, 245, 252),
+    sub      = Color3.fromRGB(255, 210, 235),
+    title    = Color3.fromRGB(255, 245, 252),
+    startBg  = Color3.fromRGB(255, 105, 180),
+    startTxt = Color3.fromRGB(90, 0, 45),
+}
+
+local power     = 32
+local keyName   = "F"
+local listening = false
+local minimized = false
+
+local function corner(p, r)
+	local c = Instance.new("UICorner")
+	c.CornerRadius = UDim.new(0, r or 14)
+	c.Parent = p
+	return c
+end
+
+local function stroke(p, col, th)
+	local s = Instance.new("UIStroke")
+	s.Color = col or C.stroke
+	s.Thickness = th or 1
+	s.Transparency = 0.25
+	s.Parent = p
+	return s
+end
+
+local gui = Instance.new("ScreenGui")
+gui.Name = "DxvinePacketLaggerGUI"
+gui.ResetOnSpawn = false
+gui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+gui.DisplayOrder = 120
+pcall(function() if syn and syn.protect_gui then syn.protect_gui(gui) end end)
+if not pcall(function() gui.Parent = game:GetService("CoreGui") end) then
+	gui.Parent = LP:WaitForChild("PlayerGui")
+end
+
+local main = Instance.new("Frame")
+main.Name = "Main"
+main.Size = UDim2.fromOffset(270, 300)
+main.Position = UDim2.new(0.5, -135, 0.5, -150)
+main.BackgroundColor3 = C.bg
+main.BorderSizePixel = 0
+main.Active = true
+main.Parent = gui
+corner(main, 18)
+stroke(main, Color3.fromRGB(255, 180, 220), 1)
+
+local title = Instance.new("TextLabel")
+title.BackgroundTransparency = 1
+title.Position = UDim2.fromOffset(18, 16)
+title.Size = UDim2.new(1, -70, 0, 22)
+title.Font = Enum.Font.GothamBold
+title.TextSize = 12
+title.TextXAlignment = Enum.TextXAlignment.Left
+title.TextColor3 = C.title
+title.Text = "VENOM PACKET LAGGER"
+title.Parent = main
+
+local miniBtn = Instance.new("TextButton")
+miniBtn.Size = UDim2.fromOffset(26, 26)
+miniBtn.Position = UDim2.new(1, -42, 0, 12)
+miniBtn.BackgroundColor3 = C.btn
+miniBtn.Text = "−"
+miniBtn.TextColor3 = C.sub
+miniBtn.Font = Enum.Font.GothamBold
+miniBtn.TextSize = 18
+miniBtn.AutoButtonColor = true
+miniBtn.Parent = main
+corner(miniBtn, 8)
+
+local content = Instance.new("Frame")
+content.Name = "Content"
+content.BackgroundTransparency = 1
+content.Position = UDim2.fromOffset(0, 46)
+content.Size = UDim2.new(1, 0, 1, -46)
+content.Parent = main
+
+-- PACKET POWER
+local powerLbl = Instance.new("TextLabel")
+powerLbl.BackgroundTransparency = 1
+powerLbl.Position = UDim2.fromOffset(20, 6)
+powerLbl.Size = UDim2.new(1, -40, 0, 16)
+powerLbl.Font = Enum.Font.GothamMedium
+powerLbl.TextSize = 11
+powerLbl.TextXAlignment = Enum.TextXAlignment.Left
+powerLbl.TextColor3 = C.sub
+powerLbl.Text = "WALK SPEED"
+powerLbl.Parent = content
+
+local powerRow = Instance.new("Frame")
+powerRow.BackgroundTransparency = 1
+powerRow.Position = UDim2.fromOffset(18, 28)
+powerRow.Size = UDim2.new(1, -36, 0, 40)
+powerRow.Parent = content
+
+local function sqBtn(txt)
+	local b = Instance.new("TextButton")
+	b.Size = UDim2.fromOffset(40, 40)
+	b.BackgroundColor3 = C.btn
+	b.Text = txt
+	b.TextColor3 = C.text
+	b.Font = Enum.Font.GothamBold
+	b.TextSize = 20
+	b.AutoButtonColor = true
+	b.Parent = powerRow
+	corner(b, 10)
+	return b
+end
+
+local minusBtn = sqBtn("−")
+minusBtn.Position = UDim2.fromOffset(0, 0)
+
+local valueBox = Instance.new("TextBox")
+valueBox.Size = UDim2.new(1, -92, 1, 0)
+valueBox.Position = UDim2.fromOffset(46, 0)
+valueBox.BackgroundColor3 = C.input
+valueBox.Text = "32"
+valueBox.TextColor3 = C.text
+valueBox.Font = Enum.Font.GothamBold
+valueBox.TextSize = 18
+valueBox.ClearTextOnFocus = false
+valueBox.Parent = powerRow
+corner(valueBox, 10)
+
+local plusBtn = sqBtn("+")
+plusBtn.Position = UDim2.new(1, -40, 0, 0)
+
+local function setPower(v)
+	v = math.clamp(math.floor(tonumber(v) or power), 8, 200)
+	power = v
+	valueBox.Text = tostring(v)
+end
+minusBtn.MouseButton1Click:Connect(function() setPower(power - 5) end)
+plusBtn.MouseButton1Click:Connect(function() setPower(power + 5) end)
+valueBox.FocusLost:Connect(function() setPower(valueBox.Text) end)
+
+-- TOGGLE KEYBIND
+local kbLbl = Instance.new("TextLabel")
+kbLbl.BackgroundTransparency = 1
+kbLbl.Position = UDim2.fromOffset(20, 82)
+kbLbl.Size = UDim2.new(1, -40, 0, 16)
+kbLbl.Font = Enum.Font.GothamMedium
+kbLbl.TextSize = 11
+kbLbl.TextXAlignment = Enum.TextXAlignment.Left
+kbLbl.TextColor3 = C.sub
+kbLbl.Text = "TOGGLE KEYBIND"
+kbLbl.Parent = content
+
+local kbBtn = Instance.new("TextButton")
+kbBtn.Size = UDim2.new(1, -36, 0, 40)
+kbBtn.Position = UDim2.fromOffset(18, 104)
+kbBtn.BackgroundColor3 = C.input
+kbBtn.Text = "F"
+kbBtn.TextColor3 = C.text
+kbBtn.Font = Enum.Font.GothamBold
+kbBtn.TextSize = 16
+kbBtn.AutoButtonColor = true
+kbBtn.Parent = content
+corner(kbBtn, 10)
+
+kbBtn.MouseButton1Click:Connect(function()
+	if listening then return end
+	listening = true
+	kbBtn.Text = "..."
+	kbBtn.TextColor3 = C.sub
+	local conn
+	conn = UIS.InputBegan:Connect(function(input)
+		if input.UserInputType ~= Enum.UserInputType.Keyboard then return end
+		keyName = input.KeyCode.Name
+		kbBtn.Text = keyName
+		kbBtn.TextColor3 = C.text
+		listening = false
+		conn:Disconnect()
+	end)
+end)
+
+-- START
+local startBtn = Instance.new("TextButton")
+startBtn.Size = UDim2.new(1, -36, 0, 44)
+startBtn.Position = UDim2.fromOffset(18, 162)
+startBtn.BackgroundColor3 = C.startBg
+startBtn.Text = "START"
+startBtn.TextColor3 = C.startTxt
+startBtn.Font = Enum.Font.GothamBlack
+startBtn.TextSize = 15
+startBtn.AutoButtonColor = true
+startBtn.Parent = content
+corner(startBtn, 12)
+
+-- ══════════════════════════════════════════════════════════════════
+--  M10RU LOGIC (SetPlayerBlockList Bomb, Delay 0.001s fest)
+-- ══════════════════════════════════════════════════════════════════
+local running = false
+local originalWalkSpeed = nil
+
+local function getHumanoid()
+    local character = LP.Character
+    return character and character:FindFirstChildOfClass("Humanoid")
+end
+
+local function setLag(state)
+    local humanoid = getHumanoid()
+    if not humanoid then
+        running = false
+        warn("[VENOM] Humanoid not found")
+        return
+    end
+    if state then
+        if not running then originalWalkSpeed = humanoid.WalkSpeed end
+        running = true
+        humanoid.WalkSpeed = power
+        print("[VENOM] WalkSpeed ON: " .. power)
+    else
+        running = false
+        if originalWalkSpeed then humanoid.WalkSpeed = originalWalkSpeed end
+        originalWalkSpeed = nil
+        print("[VENOM] WalkSpeed restored")
+    end
+end
+
+local on = false
+local function toggleLagger()
+	on = not on
+	if on then
+		startBtn.Text = "STOP"
+		startBtn.BackgroundColor3 = Color3.fromRGB(200, 45, 55)
+		startBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+		setLag(true)
+	else
+		startBtn.Text = "START"
+		startBtn.BackgroundColor3 = C.startBg
+		startBtn.TextColor3 = C.startTxt
+		setLag(false)
+	end
+end
+startBtn.MouseButton1Click:Connect(toggleLagger)
+
+UIS.InputBegan:Connect(function(input, processed)
+	if processed then return end
+	if listening then return end
+	if input.UserInputType ~= Enum.UserInputType.Keyboard then return end
+	if input.KeyCode.Name ~= keyName then return end
+	toggleLagger()
+end)
+
+valueBox.FocusLost:Connect(function()
+    setPower(valueBox.Text)
+    if running then
+        local humanoid = getHumanoid()
+        if humanoid then humanoid.WalkSpeed = power end
+    end
+end)
+
+LP.CharacterAdded:Connect(function(character)
+    if running then
+        local humanoid = character:WaitForChild("Humanoid", 10)
+        if humanoid then
+            originalWalkSpeed = humanoid.WalkSpeed
+            humanoid.WalkSpeed = power
+        end
+    end
+end)
+
+miniBtn.MouseButton1Click:Connect(function()
+	minimized = not minimized
+	content.Visible = not minimized
+	TS:Create(main, TweenInfo.new(0.18), {
+		Size = minimized and UDim2.fromOffset(270, 48) or UDim2.fromOffset(270, 300)
+	}):Play()
+end)
+
+do
+	local dragging, dragStart, startPos
+	main.InputBegan:Connect(function(input)
+		if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+			dragging = true
+			dragStart = input.Position
+			startPos = main.Position
+			input.Changed:Connect(function()
+				if input.UserInputState == Enum.UserInputState.End then dragging = false end
+			end)
+		end
+	end)
+	UIS.InputChanged:Connect(function(input)
+		if not dragging then return end
+		if input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch then
+			local d = input.Position - dragStart
+			main.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + d.X, startPos.Y.Scale, startPos.Y.Offset + d.Y)
+		end
+	end)
+end
+
+print("[VENOM] Loaded — WalkSpeed control ready | press " .. keyName)
