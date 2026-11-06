@@ -11247,15 +11247,55 @@ round(progressFill, 2)
 progressFill.BackgroundColor3 = Color3.new(1, 1, 1)
 make("UIGradient", progressFill, {Color = ColorSequence.new(Halloween.purple, Halloween.accent)})
 local lastProgress, lastPartsRevision, lastProgressMode = -1, -1, nil
-local clear = button(content, "clear", "Clear", UDim2.new(0, 6, 1, -74), UDim2.new(1 / 3, -12, 0, 30))
+-- Footer controls use the same compact slider appearance as the main Auto Redeem switches.
+-- One-shot actions keep their original callbacks and briefly animate the switch when tapped.
+local function footerSwitch(name, label, position, size)
+    local control = make("TextButton", content, {Name = name, Text = "", Position = position, Size = size,
+        BackgroundColor3 = cardColor, BackgroundTransparency = 0.08, AutoButtonColor = false,
+        BorderSizePixel = 0, TextTransparency = 1})
+    round(control, 10)
+    stroke(control, Halloween.purple, 0.76)
+    local caption = make("TextLabel", control, {Name = "label", Text = label,
+        Position = UDim2.fromOffset(7, 0), Size = UDim2.new(1, -48, 1, 0),
+        BackgroundTransparency = 1, Font = Enum.Font.GothamMedium, TextSize = 11,
+        TextColor3 = white, TextXAlignment = Enum.TextXAlignment.Left,
+        TextTruncate = Enum.TextTruncate.AtEnd})
+    local track = make("Frame", control, {Name = "switch", Position = UDim2.new(1, -37, 0.5, -9),
+        Size = UDim2.fromOffset(31, 18), BackgroundColor3 = Halloween.off,
+        BackgroundTransparency = 0.08, BorderSizePixel = 0})
+    round(track, 10)
+    local knob = make("Frame", track, {Name = "knob", Position = UDim2.fromOffset(3, 3),
+        Size = UDim2.fromOffset(12, 12), BackgroundColor3 = muted, BorderSizePixel = 0})
+    round(knob, 6)
+    local item = {button = control, label = caption, track = track, knob = knob, active = false}
+    function item:set(on)
+        self.active = on == true
+        self.button:SetAttribute("on", self.active)
+        animate(self.track, {BackgroundColor3 = self.active and accent or Halloween.off})
+        animate(self.knob, {Position = UDim2.fromOffset(self.active and 16 or 3, 3),
+            BackgroundColor3 = self.active and white or muted})
+    end
+    function item:pulse()
+        self:set(true)
+        task.delay(0.22, function()
+            if self.button and self.button.Parent and self.button:IsDescendantOf(gui) then self:set(false) end
+        end)
+    end
+    return item
+end
+local footerWidth = UDim2.new(1 / 3, -12, 0, 30)
+local clearControl = footerSwitch("clear", "Clear", UDim2.new(0, 6, 1, -74), footerWidth)
+local clear = clearControl.button
 connect(clear.Activated, function()
     state.submissionLedger, state.retypeSafety = {}, false
     engine:clear(true) riddleSolver:clear()
     riddleSolver:setArmed(riddleSolver.enabled and not engine.autoMode)
 end)
-local senderButton = button(content, "sender", "Sender", UDim2.new(1 / 3, 6, 1, -74), UDim2.new(1 / 3, -12, 0, 30))
-local fpsButton = button(content, "fps_boost", "FPS Boost", UDim2.new(2 / 3, 6, 1, -74), UDim2.new(1 / 3, -12, 0, 30))
-fpsButton.TextSize = 12
+connect(clear.Activated, function() clearControl:pulse() end)
+local senderControl = footerSwitch("sender", "Sender", UDim2.new(1 / 3, 6, 1, -74), footerWidth)
+local senderButton = senderControl.button
+local fpsControl = footerSwitch("fps_boost", "FPS Boost", UDim2.new(2 / 3, 6, 1, -74), footerWidth)
+local fpsButton = fpsControl.button
 
 -- Local announcement testing.
 local senderShadow = make("Frame", root, {Name = "sender_shadow", Visible = false,
@@ -11344,6 +11384,7 @@ connect(senderButton.Activated, function()
     animate(senderWindow, {GroupTransparency = 0}, 0.22)
     animate(senderShadow, {BackgroundTransparency = 0.65}, 0.22)
 end)
+connect(senderButton.Activated, function() senderControl:pulse() end)
 connect(senderClose.Activated, function()
     if senderClosing or state.closing then return end
     senderEpoch += 1
@@ -11598,16 +11639,14 @@ end
 updateToolRows = function()
     for _, update in ipairs(toolRows) do pcall(update) end
 end
-local riddleButton = button(content, "riddle_settings", "Riddle Settings", UDim2.new(0, 6, 1, -36), UDim2.new(1 / 3, -12, 0, 30))
-local retypeButton = button(content, "retype", "Retype", UDim2.new(1 / 3, 6, 1, -36), UDim2.new(1 / 3, -12, 0, 30))
-local adminButton = button(content, "admin_abuse_helper", "Admin Abuse Helper", UDim2.new(2 / 3, 6, 1, -36), UDim2.new(1 / 3, -12, 0, 30))
-for _, footerButton in ipairs({clear, senderButton, fpsButton, riddleButton, retypeButton, adminButton}) do
-    footerButton.TextSize = 13
-    footerButton.TextScaled = true
-    make("UITextSizeConstraint", footerButton, {MinTextSize = 10, MaxTextSize = 13})
-    footerButton:SetAttribute("aetherion_window_animation", true)
-    make("UIPadding", footerButton, {PaddingLeft = UDim.new(0, 12), PaddingRight = UDim.new(0, 12),
-        PaddingTop = UDim.new(0, 3), PaddingBottom = UDim.new(0, 3)})
+local riddleControl = footerSwitch("riddle_settings", "Riddle", UDim2.new(0, 6, 1, -36), footerWidth)
+local riddleButton = riddleControl.button
+local retypeControl = footerSwitch("retype", "Retype", UDim2.new(1 / 3, 6, 1, -36), footerWidth)
+local retypeButton = retypeControl.button
+local adminControl = footerSwitch("admin_abuse_helper", "Admin Abuse", UDim2.new(2 / 3, 6, 1, -36), footerWidth)
+local adminButton = adminControl.button
+for _, control in ipairs({clearControl, senderControl, fpsControl, riddleControl, retypeControl, adminControl}) do
+    control.button:SetAttribute("aetherion_window_animation", true)
 end
 local riddleWindow, riddleBody, openRiddleWindow = makeToolWindow("riddle_settings_window", "Riddle Settings", Vector2.new(390, 386))
 local riddleStatus = text(riddleBody, "status", "AI Riddle Solver", UDim2.fromOffset(12, 0), UDim2.new(1, -24, 0, 24), 12, highlight, true)
@@ -11710,7 +11749,9 @@ local adminInfo = text(adminBody, "info", "Locks Your Movement. Hits Can Still P
 adminInfo.Size = UDim2.new(1, -68, 0, 24)
 Halloween.ornamentRow(adminBody, "halloween_footer_ornaments", UDim2.new(1, -12, 0, 166), 24, {"spider"}, true, 123)
 connect(riddleButton.Activated, openRiddleWindow)
+connect(riddleButton.Activated, function() riddleControl:pulse() end)
 connect(adminButton.Activated, openAdminWindow)
+connect(adminButton.Activated, function() adminControl:pulse() end)
 
 -- Drag, resize and collapse.
 local handles = {}
@@ -12266,8 +12307,8 @@ riddleSolver = createRiddleSolver(Config, {
 state.riddleSolver = riddleSolver
 state.fps = createFPSController(function(f)
     if not state.alive then return end
-    fpsButton.Text = f.busy and "Boosting..." or (f.enabled and "FPS Boost On" or "FPS Boost")
-    fpsButton:SetAttribute("on", f.enabled)
+    fpsControl.label.Text = f.busy and "Boosting..." or "FPS Boost"
+    fpsControl:set(f.enabled)
     gui:SetAttribute("fps_boost", f.enabled)
     gui:SetAttribute("fps_boost_busy", f.busy)
     gui:SetAttribute("fps_textures_removed", f.textures)
@@ -12441,6 +12482,7 @@ connect(retypeButton.Activated, function()
     local ok, reason = state.retypeReplay:run()
     if not ok then engine.status = reason requestRefresh() end
 end)
+connect(retypeButton.Activated, function() retypeControl:pulse() end)
 if engine.autoMode then state.syncAutoSolver()
 elseif saved.riddleEnabled == true then riddleSolver:setEnabled(true, true) end
 
